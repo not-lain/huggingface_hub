@@ -9,6 +9,7 @@ from .constants import CONFIG_NAME, PYTORCH_WEIGHTS_NAME, SAFETENSORS_SINGLE_FIL
 from .file_download import hf_hub_download
 from .hf_api import HfApi
 from .repocard import ModelCard, ModelCardData
+from .serialization import safe_save_file, split_torch_state_dict_into_shards
 from .utils import (
     EntryNotFoundError,
     HfHubHTTPError,
@@ -782,6 +783,23 @@ class PyTorchModelHubMixin(ModelHubMixin):
             )
             model.to(map_location)  # type: ignore [attr-defined]
         return model
+
+    def save_state_dict(state_dict: Dict[str, torch.Tensor], save_directory: str):
+        state_dict_split = split_torch_state_dict_into_shards(state_dict)
+        for filename, tensors in state_dict_split.filename_to_tensors.values():
+            shard = {tensor: state_dict[tensor] for tensor in tensors}
+            safe_save_file(
+                shard,
+                os.path.join(save_directory, filename),
+                metadata={"format": "pt"},
+            )
+        if state_dict_split.is_sharded:
+            index = {
+                "metadata": state_dict_split.metadata,
+                "weight_map": state_dict_split.tensor_to_filename,
+            }
+            with open(os.path.join(save_directory, "model.safetensors.index.json"), "w") as f:
+                f.write(json.dumps(index, indent=2))
 
 
 def _load_dataclass(datacls: Type["DataclassInstance"], data: dict) -> "DataclassInstance":
