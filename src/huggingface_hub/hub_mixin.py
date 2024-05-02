@@ -9,7 +9,7 @@ from .constants import CONFIG_NAME, PYTORCH_WEIGHTS_NAME, SAFETENSORS_SINGLE_FIL
 from .file_download import hf_hub_download
 from .hf_api import HfApi
 from .repocard import ModelCard, ModelCardData
-from .serialization import safe_save_file, split_torch_state_dict_into_shards
+from .serialization import split_torch_state_dict_into_shards
 from .utils import (
     EntryNotFoundError,
     HfHubHTTPError,
@@ -30,6 +30,7 @@ if is_torch_available():
 
 if is_safetensors_available():
     from safetensors.torch import load_model as load_model_as_safetensor
+    from safetensors.torch import save_file as safe_save_file
     from safetensors.torch import save_model as save_model_as_safetensor
 
 
@@ -780,15 +781,20 @@ class PyTorchModelHubMixin(ModelHubMixin):
             model.to(map_location)  # type: ignore [attr-defined]
         return model
 
-    def save_state_dict(state_dict: Dict[str, torch.Tensor], save_directory: str):
+    def save_state_dict(self, state_dict: Dict[str, torch.Tensor], save_directory: str):
         state_dict_split = split_torch_state_dict_into_shards(state_dict)
         for filename, tensors in state_dict_split.filename_to_tensors.values():
             shard = {tensor: state_dict[tensor] for tensor in tensors}
-            safe_save_file(
-                shard,
-                os.path.join(save_directory, filename),
-                metadata={"format": "pt"},
-            )
+            if is_safetensors_available():
+                safe_save_file(
+                    shard,
+                    os.path.join(save_directory, filename),
+                    metadata={"format": "pt"},
+                )
+            else:
+                raise ImportError(
+                    "Safetensors library is not installed. Please install it using `pip install safetensors`."
+                )
         if state_dict_split.is_sharded:
             index = {
                 "metadata": state_dict_split.metadata,
